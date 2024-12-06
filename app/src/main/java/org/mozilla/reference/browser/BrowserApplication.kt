@@ -5,16 +5,16 @@
 package org.mozilla.reference.browser
 
 import android.app.Application
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import mozilla.components.browser.state.action.SystemAction
 import mozilla.components.concept.engine.webextension.isUnsupported
 import mozilla.components.concept.push.PushProcessor
 import mozilla.components.feature.addons.update.GlobalAddonDependencyProvider
 import mozilla.components.support.base.log.Log
-import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.base.log.sink.AndroidLogSink
 import mozilla.components.support.ktx.android.content.isMainProcess
 import mozilla.components.support.ktx.android.content.runOnlyInMainProcess
@@ -28,33 +28,43 @@ import org.mozilla.reference.browser.push.WebPushEngineIntegration
 import java.util.concurrent.TimeUnit
 
 open class BrowserApplication : Application() {
+
+    // it would be better to keep the scope and the dispatchers in a DI to have more control over them
+    private val applicationScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     val components by lazy { Components(this) }
 
-    override fun onCreate() {
-        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_APPLICATION_CREATION)
-        super.onCreate()
-
-        setupCrashReporting(this)
-
-        RustHttpConfig.setClient(lazy { components.core.client })
+    private fun initializeCriticalComponents() {
         setupLogging()
 
-        if (!isMainProcess()) {
-            // If this is not the main process then do not continue with the initialization here. Everything that
-            // follows only needs to be done in our app's main process and should not be done in other processes like
-            // a GeckoView child process or the crash handling process. Most importantly we never want to end up in a
-            // situation where we create a GeckoRuntime from the Gecko child process (
-            return
+        RustHttpConfig.setClient(lazy { components.core.client })
+
+        applicationScope.launch(Dispatchers.Main) {
+            // warmup requires main thread
+            components.core.engine.warmUp()
         }
 
-        components.core.engine.warmUp()
+    }
 
-        restoreBrowserState()
+    private fun initializeNonCriticalComponents() {
 
+        applicationScope.launch(Dispatchers.Main) {
+            // they require main thread
+            launch { initializeAddons() }
+            launch { initializePushFeatures() }
+        }
+
+        applicationScope.launch(Dispatchers.IO) {
+            components.core.fileUploadsDirCleaner.cleanUploadsDirectory()
+        }
+    }
+
+    private fun initializeAddons() {
         GlobalAddonDependencyProvider.initialize(
             components.core.addonManager,
-            components.core.addonUpdater,
+            components.core.addonUpdater
         )
+
         WebExtensionSupport.initialize(
             runtime = components.core.engine,
             store = components.core.store,
@@ -62,7 +72,7 @@ open class BrowserApplication : Application() {
                 val tabId = components.useCases.tabsUseCases.addTab(
                     url = url,
                     selectTab = true,
-                    engineSession = engineSession,
+                    engineSession = engineSession
                 )
                 tabId
             },
@@ -80,32 +90,56 @@ open class BrowserApplication : Application() {
                 if (hasUnsupportedAddons) {
                     checker.registerForChecks()
                 } else {
-                    // As checks are a persistent subscriptions, we have to make sure
-                    // we remove any previous subscriptions.
                     checker.unregisterForChecks()
                 }
             },
-            onUpdatePermissionRequest = components.core.addonUpdater::onUpdatePermissionRequest,
+            onUpdatePermissionRequest = components.core.addonUpdater::onUpdatePermissionRequest
         )
+    }
 
-        components.push.feature?.let {
-            Logger.info("AutoPushFeature is configured, initializing it...")
+    private fun initializePushFeatures() {
+        components.push.feature?.let { pushFeature ->
 
-            PushProcessor.install(it)
+            PushProcessor.install(pushFeature)
 
-            // WebPush integration to observe and deliver push messages to engine.
-            WebPushEngineIntegration(components.core.engine, it).start()
+            WebPushEngineIntegration(components.core.engine, pushFeature).start()
 
-            // Perform a one-time initialization of the account manager if a message is received.
-            PushFxaIntegration(it, lazy { components.backgroundServices.accountManager }).launch()
+            PushFxaIntegration(pushFeature, lazy { components.backgroundServices.accountManager }).launch()
 
-            // Initialize the push feature and service.
-            it.initialize()
+            pushFeature.initialize()
         }
-        @OptIn(DelicateCoroutinesApi::class)
-        GlobalScope.launch(Dispatchers.IO) {
-            components.core.fileUploadsDirCleaner.cleanUploadsDirectory()
+    }
+
+    private suspend fun initializeStoreAndState() {
+        withContext(Dispatchers.Main) {
+            val store = components.core.store
+            val sessionStorage = components.core.sessionStorage
+
+            components.useCases.tabsUseCases.restore(sessionStorage)
+
+            sessionStorage.autoSave(store)
+                .periodicallyInForeground(interval = 30, unit = TimeUnit.SECONDS)
+                .whenGoingToBackground()
+                .whenSessionsChange()
         }
+    }
+
+    override fun onCreate() {
+        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_APPLICATION_CREATION)
+        super.onCreate()
+
+        if (!isMainProcess()) {
+            setupCrashReporting(this)
+            return
+        }
+
+        initializeCriticalComponents()
+
+        applicationScope.launch(Dispatchers.Default) {
+            initializeStoreAndState()
+            initializeNonCriticalComponents()
+        }
+
         PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_APPLICATION_CREATION)
     }
 
@@ -117,28 +151,12 @@ open class BrowserApplication : Application() {
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun restoreBrowserState() = GlobalScope.launch(Dispatchers.Main) {
-        val store = components.core.store
-        val sessionStorage = components.core.sessionStorage
-
-        components.useCases.tabsUseCases.restore(sessionStorage)
-
-        // Now that we have restored our previous state (if there's one) let's setup auto saving the state while
-        // the app is used.
-        sessionStorage.autoSave(store)
-            .periodicallyInForeground(interval = 30, unit = TimeUnit.SECONDS)
-            .whenGoingToBackground()
-            .whenSessionsChange()
-    }
-
     companion object {
         const val NON_FATAL_CRASH_BROADCAST = "org.mozilla.reference.browser"
     }
 }
 
 private fun setupLogging() {
-    // We want the log messages of all builds to go to Android logcat
     Log.addSink(AndroidLogSink())
     RustLog.enable()
 }
