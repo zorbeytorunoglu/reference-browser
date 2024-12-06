@@ -11,8 +11,12 @@ import android.util.AttributeSet
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import mozilla.components.browser.state.state.WebExtensionState
 import mozilla.components.concept.engine.EngineView
 import mozilla.components.feature.intent.ext.EXTRA_SESSION_ID
@@ -43,9 +47,6 @@ open class BrowserActivity : AppCompatActivity() {
         WebExtensionPopupObserver(components.core.store, ::openPopup)
     }
 
-    /**
-     * Returns a new instance of [BrowserFragment] to display.
-     */
     open fun createBrowserFragment(sessionId: String?): Fragment =
         BrowserFragment.create(sessionId)
 
@@ -54,6 +55,16 @@ open class BrowserActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        initializeCriticalComponents(savedInstanceState)
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            initializeNonCriticalComponents()
+        }
+
+        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_ACTIVITY_CREATION)
+    }
+
+    private fun initializeCriticalComponents(savedInstanceState: Bundle?) {
         components.notificationsDelegate.bindToActivity(this)
 
         if (savedInstanceState == null) {
@@ -63,18 +74,23 @@ open class BrowserActivity : AppCompatActivity() {
                 commit()
             }
         }
+    }
 
-        if (isCrashReportActive) {
-            crashIntegration = CrashIntegration(this, components.analytics.crashReporter) { crash ->
-                onNonFatalCrash(crash)
+    private suspend fun initializeNonCriticalComponents() {
+        withContext(Dispatchers.Main) {
+            if (isCrashReportActive) {
+                crashIntegration = CrashIntegration(
+                    this@BrowserActivity,
+                    components.analytics.crashReporter
+                ) { crash -> onNonFatalCrash(crash) }
+                lifecycle.addObserver(crashIntegration)
             }
-            lifecycle.addObserver(crashIntegration)
+            lifecycle.addObserver(webExtensionPopupObserver)
         }
 
-        NotificationManager.checkAndNotifyPolicy(this)
-        lifecycle.addObserver(webExtensionPopupObserver)
-
-        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_ACTIVITY_CREATION)
+        withContext(Dispatchers.IO) {
+            NotificationManager.checkAndNotifyPolicy(this@BrowserActivity)
+        }
     }
 
     @Suppress("MissingSuperCall", "OVERRIDE_DEPRECATION")
