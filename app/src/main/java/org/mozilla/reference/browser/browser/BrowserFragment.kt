@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.view.View
 import androidx.preference.PreferenceManager
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import kotlinx.coroutines.flow.map
+import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.thumbnails.BrowserThumbnails
 import mozilla.components.browser.toolbar.BrowserToolbar
 import mozilla.components.concept.engine.EngineView
@@ -18,11 +20,13 @@ import mozilla.components.feature.syncedtabs.SyncedTabsStorageSuggestionProvider
 import mozilla.components.feature.tabs.WindowFeature
 import mozilla.components.feature.tabs.toolbar.TabsToolbarFeature
 import mozilla.components.feature.toolbar.WebExtensionToolbarFeature
+import mozilla.components.lib.state.ext.flowScoped
 import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import org.mozilla.reference.browser.R
 import org.mozilla.reference.browser.ext.components
 import org.mozilla.reference.browser.ext.requireComponents
+import org.mozilla.reference.browser.performance.PerformanceLogger
 import org.mozilla.reference.browser.search.AwesomeBarWrapper
 import org.mozilla.reference.browser.tabs.TabsTrayFragment
 
@@ -55,6 +59,33 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
     @Suppress("LongMethod")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_FRAGMENT_DRAW)
+
+        // Zorbey Torunoğlu:
+        // UI becomes visible/interactable quite a while later (2412.33ms on average when cold start).
+        // Listener below is to get the closest data to see how long does it take to become visible.
+        view.viewTreeObserver.addOnGlobalLayoutListener {
+            PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_FRAGMENT_DRAW)
+        }
+
+        // Zorbey Torunoğlu:
+        // Measuring the page load speed.
+        requireComponents.core.store.flowScoped(viewLifecycleOwner) { flow ->
+            flow.map { state ->
+                state.selectedTab
+            }.collect { tab ->
+                // TODO: add logger in Application class
+                when (tab?.content?.progress) {
+                    0 -> {
+                        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.PAGE_LOAD_SPEED)
+                    }
+                    100 -> {
+                        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.PAGE_LOAD_SPEED)
+                    }
+                }
+            }
+        }
 
         AwesomeBarFeature(awesomeBar, toolbar, engineView)
             .addSearchProvider(
@@ -138,6 +169,7 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
         )
 
         engineView.setDynamicToolbarMaxHeight(resources.getDimensionPixelSize(R.dimen.browser_toolbar_height))
+        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_FRAGMENT_CREATION)
     }
 
     private fun showTabs() {

@@ -27,6 +27,7 @@ import org.mozilla.reference.browser.browser.BrowserFragment
 import org.mozilla.reference.browser.browser.CrashIntegration
 import org.mozilla.reference.browser.ext.components
 import org.mozilla.reference.browser.ext.isCrashReportActive
+import org.mozilla.reference.browser.performance.PerformanceLogger
 
 /**
  * Activity that holds the [BrowserFragment].
@@ -49,12 +50,14 @@ open class BrowserActivity : AppCompatActivity() {
         BrowserFragment.create(sessionId)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_ACTIVITY_CREATION)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         components.notificationsDelegate.bindToActivity(this)
 
         if (savedInstanceState == null) {
+            PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_FRAGMENT_CREATION)
             supportFragmentManager.beginTransaction().apply {
                 replace(R.id.container, createBrowserFragment(sessionId))
                 commit()
@@ -70,6 +73,8 @@ open class BrowserActivity : AppCompatActivity() {
 
         NotificationManager.checkAndNotifyPolicy(this)
         lifecycle.addObserver(webExtensionPopupObserver)
+
+        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_ACTIVITY_CREATION)
     }
 
     @Suppress("MissingSuperCall", "OVERRIDE_DEPRECATION")

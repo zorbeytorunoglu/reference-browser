@@ -22,6 +22,7 @@ import mozilla.components.support.rusthttp.RustHttpConfig
 import mozilla.components.support.rustlog.RustLog
 import mozilla.components.support.webextensions.WebExtensionSupport
 import org.mozilla.reference.browser.ext.isCrashReportActive
+import org.mozilla.reference.browser.performance.PerformanceLogger
 import org.mozilla.reference.browser.push.PushFxaIntegration
 import org.mozilla.reference.browser.push.WebPushEngineIntegration
 import java.util.concurrent.TimeUnit
@@ -30,6 +31,7 @@ open class BrowserApplication : Application() {
     val components by lazy { Components(this) }
 
     override fun onCreate() {
+        PerformanceLogger.startMeasuring(PerformanceLogger.Tags.BROWSER_APPLICATION_CREATION)
         super.onCreate()
 
         setupCrashReporting(this)
@@ -104,6 +106,7 @@ open class BrowserApplication : Application() {
         GlobalScope.launch(Dispatchers.IO) {
             components.core.fileUploadsDirCleaner.cleanUploadsDirectory()
         }
+        PerformanceLogger.stopMeasuring(PerformanceLogger.Tags.BROWSER_APPLICATION_CREATION)
     }
 
     override fun onTrimMemory(level: Int) {
