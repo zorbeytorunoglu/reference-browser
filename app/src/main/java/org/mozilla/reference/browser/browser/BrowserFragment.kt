@@ -7,7 +7,6 @@ package org.mozilla.reference.browser.browser
 import android.os.Bundle
 import android.view.View
 import androidx.lifecycle.lifecycleScope
-import androidx.preference.PreferenceManager
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -161,11 +160,8 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
         initializeFeatures()
     }
 
-    override val shouldUseComposeUI: Boolean
-        get() = PreferenceManager.getDefaultSharedPreferences(requireContext()).getBoolean(
-            getString(R.string.pref_key_compose_ui),
-            false,
-        )
+    // unnecessary sync io action, value is not used
+    override val shouldUseComposeUI: Boolean get() = false
 
     @Suppress("LongMethod")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
