@@ -325,14 +325,21 @@ abstract class BaseBrowserFragment : Fragment(), UserInteractionHandler, Activit
     private val lastTabFeature = ViewBoundFeatureWrapper<LastTabFeature>()
     private val screenOrientationFeature = ViewBoundFeatureWrapper<ScreenOrientationFeature>()
 
-    private val engineView: EngineView
-        get() = requireView().findViewById<View>(R.id.engineView) as EngineView
-    private val toolbar: BrowserToolbar
-        get() = requireView().findViewById(R.id.toolbar)
-    private val findInPageBar: FindInPageBar
-        get() = requireView().findViewById(R.id.findInPageBar)
-    private val swipeRefresh: SwipeRefreshLayout
-        get() = requireView().findViewById(R.id.swipeRefresh)
+    private val engineView: EngineView by lazy {
+        requireView().findViewById<View>(R.id.engineView) as EngineView
+    }
+
+    private val toolbar: BrowserToolbar by lazy {
+        requireView().findViewById(R.id.toolbar)
+    }
+
+    private val findInPageBar: FindInPageBar by lazy {
+        requireView().findViewById(R.id.findInPageBar)
+    }
+
+    private val swipeRefresh: SwipeRefreshLayout by lazy {
+        requireView().findViewById(R.id.swipeRefresh)
+    }
 
     private val backButtonHandler: List<ViewBoundFeatureWrapper<*>> = listOf(
         fullScreenFeature,
