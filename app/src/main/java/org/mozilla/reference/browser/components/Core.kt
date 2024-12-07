@@ -68,6 +68,7 @@ class Core(private val context: Context, crashReporter: CrashReporter) {
      * configuration (see build variants).
      */
     val engine: Engine by lazy {
+        // sync io actions again, we normally need to handle this as well
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
 
         val defaultSettings = DefaultSettings(
@@ -80,6 +81,18 @@ class Core(private val context: Context, crashReporter: CrashReporter) {
                 context.getPreferenceKey(R.string.pref_key_global_privacy_control),
                 false,
             ),
+            suspendMediaWhenInactive = true,
+            webFontsEnabled = true,
+            domStorageEnabled = true,
+            mediaPlaybackRequiresUserGesture = true,
+            javaScriptCanOpenWindowsAutomatically = false,
+            parallelMarkingEnabled = true,
+            fetchPriorityEnabled = true,
+            loadWithOverviewMode = true,
+            javascriptEnabled = true,
+            automaticFontSizeAdjustment = false,
+            forceUserScalableContent = false,
+            fontInflationEnabled = false,
         )
         EngineProvider.createEngine(context, defaultSettings)
     }
